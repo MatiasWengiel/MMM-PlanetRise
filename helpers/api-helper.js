@@ -1,36 +1,71 @@
-import { getDateToday, getDateTomorrow } from "./date-helpers.js";
+import {
+  getDateToday,
+  getDateTomorrow,
+  stringDateToUTCDate,
+} from "./date-helpers.js";
 
+// earth: 399, can't observe Earth from Earth
 const planets = {
-  // Mercury: 199,
+  Mercury: 199,
   Venus: 299,
-  // //   earth: 399, can't observe Earth from Earth
-  // Mars: 499,
-  // Jupiter: 599,
-  // Saturn: 699,
-  // Uranus: 799,
-  // Neptune: 899,
+  Mars: 499,
+  Jupiter: 599,
+  Saturn: 699,
+  Uranus: 799,
+  Neptune: 899,
 };
 
 const location = "'-97.13000,+49.90000,0'";
 
-//TODO: Figure out if we can change the time from UTC to local, so that the date is more accurate
+// TODO: Figure out if we can change the time from UTC to local, so that the date is more accurate
 const getUrl = (planet, location) =>
-  `https://ssd.jpl.nasa.gov/api/horizons.api?format=json&MAKE_EPHEM=YES&COMMAND=${planet}&EPHEM_TYPE=OBSERVER&CENTER='coord@399'&COORD_TYPE=GEODETIC&SITE_COORD=${location}&START_TIME='${getDateToday()}'&STOP_TIME='${getDateTomorrow()}'&STEP_SIZE='1m'&QUANTITIES='9'&REF_SYSTEM='ICRF'&CAL_FORMAT='CAL'&CAL_TYPE='M'&TIME_DIGITS='MINUTES'&ANG_FORMAT='HMS'&APPARENT='AIRLESS'&RANGE_UNITS='AU'&SUPPRESS_RANGE_RATE='NO'&SKIP_DAYLT='NO'&SOLAR_ELONG='0,180'&EXTRA_PREC='NO'&R_T_S_ONLY='TVH'&CSV_FORMAT='NO'&OBJ_DATA='NO'`;
+  `https://ssd.jpl.nasa.gov/api/horizons.api?format=json&MAKE_EPHEM=YES&COMMAND=${planet}&EPHEM_TYPE=OBSERVER&CENTER='coord@399'&COORD_TYPE=GEODETIC&SITE_COORD=${location}&START_TIME='${getDateToday}'&STOP_TIME='${getDateTomorrow}'&STEP_SIZE='1m'&QUANTITIES='9'&REF_SYSTEM='ICRF'&CAL_FORMAT='CAL'&CAL_TYPE='M'&TIME_DIGITS='MINUTES'&ANG_FORMAT='HMS'&APPARENT='AIRLESS'&RANGE_UNITS='AU'&SUPPRESS_RANGE_RATE='NO'&SKIP_DAYLT='NO'&SOLAR_ELONG='0,180'&EXTRA_PREC='NO'&R_T_S_ONLY='TVH'&CSV_FORMAT='NO'&OBJ_DATA='NO'`;
 
 const parseResponse = (response) => {
-  console.info(new Date(getDateToday()), new Date(getDateTomorrow()));
-  const split = response.split("$$")[1];
-  console.log(split);
-  const set = split.match(/\d{4}-[a-zA-Z]{3}-\d{2}\s\d{2}:\d{2}/gm)[0];
-  const rise = split.match(/\d{4}-[a-zA-Z]{3}-\d{2}\s\d{2}:\d{2}/gm)[1];
-  console.log("set is ", new Date(set + " UTC").toLocaleString());
+  const relevantResponseSection = response.split("$$")[1];
+  const arrayOfValues = relevantResponseSection
+    //Split each set of values in the string into its own array element
+    .split("\\n")
+    //Remove the ones that don't have a date in them (they are not necessary)
+    .filter((value) => value.match(/\d{4}-[a-zA-Z]{3}-\d{2}\s\d{2}:\d{2}/gm));
 
-  const riseDate = new Date(rise + " UTC");
+  const refinedValues = arrayOfValues.map((value) => {
+    //Remove extra white space, leave one so we can split each part of the value to form an array
+    const valueAsArray = value.replace(/\s+/g, " ").trim().split(" ");
 
-  return riseDate.toLocaleString();
+    valueAsArray.splice(valueAsArray.length - 2, 2);
+
+    return valueAsArray;
+  });
+
+  // Finds each value array that contains an "r" (for rise) or "s" (for set), parses it into a string without the last part of the valueArray
+  // and turns it into a date
+  const rises = refinedValues
+    .filter((value) => value[2].includes("r"))
+    .map((value) => `${value[0]} ${value[1]}`)
+    .map((value) => new Date(value + " UTC"));
+  const sets = refinedValues
+    .filter((value) => value[2].includes("s"))
+    .map((value) => `${value[0]} ${value[1]}`)
+    .map((value) => stringDateToUTCDate(value));
+
+  /* TENTATIVE LOGIC
+     if (planet is up) => <planet> is currently in the sky, setting at <time> \n next rise <time>
+     if (!planet is up) => <planet> is not currently in the sky, rising at <time> \n next set <time> 
+  */
+  const isPlanetUp = rises[0] > sets[0];
+  const nextSet = sets[0] > new Date() ? sets[0] : sets[1];
+
+  if (isPlanetUp) {
+    return `is currently in the sky, and will set at ${nextSet.toLocaleString()}. Next rise will be ${
+      rises[0]
+    }`;
+  }
+
+  return `will rise at ${rises[0].toLocaleString()}, and will set at ${nextSet.toLocaleString()}. It will rise again at ${rises[1].toLocaleString()}`;
 };
 
-const getPlanetRise = async (url) =>
+const getPlanetRiseAndSet = async (url) =>
   await fetch(url)
     .then((response) => response.body)
     .then((responseBody) => {
@@ -52,15 +87,18 @@ const getPlanetRise = async (url) =>
         },
       });
     })
-    .then((stream) => new Response(stream, { headers: { "Content-Type": "text/html" } }).text())
+    .then((stream) =>
+      new Response(stream, { headers: { "Content-Type": "text/html" } }).text()
+    )
     .then((result) => {
       const response = parseResponse(result);
       return response;
     });
 
-// console.log(await getPlanetRise(url));
-
 for (const planet in planets) {
   const url = getUrl(planets[planet], location);
-  console.log(`${planet} rises at:`, await getPlanetRise(url));
+  const riseAndSet = await getPlanetRiseAndSet(url);
+  console.log(`${planet} ${riseAndSet}`);
 }
+
+//Make it so that if the rise time is < timeNow, says something like "planet is already up"
