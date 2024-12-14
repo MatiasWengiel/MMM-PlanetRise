@@ -1,0 +1,15 @@
+.icon {
+  width: 30px;
+  height: 30px;
+  margin-right: 10px;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.grayscale {
+  filter: grayscale(100%);
+}
